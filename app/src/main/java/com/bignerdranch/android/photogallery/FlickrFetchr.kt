@@ -8,8 +8,10 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.bignerdranch.android.photogallery.api.FlickrApi
 import com.bignerdranch.android.photogallery.api.FlickrResponse
+import com.bignerdranch.android.photogallery.api.PhotoInterceptor
 import com.bignerdranch.android.photogallery.api.PhotoResponse
 import com.bignerdranch.android.photogallery.model.GalleryItem
+import okhttp3.OkHttpClient
 import okhttp3.ResponseBody
 import retrofit2.Call
 import retrofit2.Callback
@@ -24,20 +26,50 @@ class FlickrFetchr {
 
     private val flickrApi: FlickrApi
 
-
+//Добавление перехватчика в конфигурацию Retrofit
+    /**
+     * Мы создаем экземпляр OkHttpClient и добавляем
+    PhotoInterceptor в качестве перехватчика. Затем мы
+    устанавливаем только что настроенный клиент на экземпляр
+    Retrofit, который заменяет клиент по умполчанию. Теперь
+    Retrofit будет использовать предоставленный вами клиент и,
+    в свою очередь, применять функцию
+    PhotoInterceptor.intercept(...) к любым запросам.
+     */
     init {
+        val client = OkHttpClient.Builder()
+            .addInterceptor(PhotoInterceptor())
+            .build()
         val retrofit: Retrofit = Retrofit.Builder()
             .baseUrl("https://api.flickr.com/")
             .addConverterFactory(GsonConverterFactory.create())
+            .client(client)
             .build()
         flickrApi = retrofit.create(FlickrApi::class.java)
 
+
     }
 
+    fun fetchPhotosRequest(): Call<FlickrResponse> {
+        return flickrApi.fetchPhotos()
+
+    }
+
+    fun searchPhotosRequest(query: String): Call<FlickrResponse> {
+        return flickrApi.searchPhotos(query)
+
+    }
 
     fun fetchPhotos(): LiveData<List<GalleryItem>> {
+        return fetchPhotoMetadata(fetchPhotosRequest())
+    }
+
+    fun searchPhotos(query: String): LiveData<List<GalleryItem>> {
+        return fetchPhotoMetadata(searchPhotosRequest(query))
+    }
+
+    private fun fetchPhotoMetadata(flickrRequest: Call<FlickrResponse>): LiveData<List<GalleryItem>> {
         val responseLiveData: MutableLiveData<List<GalleryItem>> = MutableLiveData()
-        val flickrRequest: Call<FlickrResponse> = flickrApi.fetchPhotos()
         flickrRequest.enqueue(object : Callback<FlickrResponse> {
             override fun onResponse(
                 call: Call<FlickrResponse>,
@@ -46,11 +78,11 @@ class FlickrFetchr {
                 Log.d(TAG, "Response received")
                 val flickrResponse: FlickrResponse? = response.body()
                 val photoResponse: PhotoResponse? = flickrResponse?.photos
-                val galleryItem: List<GalleryItem> = photoResponse?.galleryItem ?: mutableListOf()
-                val galleryItems = galleryItem.filterNot {
+                var galleryItem: List<GalleryItem> = photoResponse?.galleryItem ?: mutableListOf()
+                galleryItem = galleryItem.filterNot {
                     it.url.isBlank()
                 }
-                responseLiveData.value = galleryItems
+                responseLiveData.value = galleryItem
             }
 
             override fun onFailure(call: Call<FlickrResponse>, t: Throwable) {
@@ -62,6 +94,7 @@ class FlickrFetchr {
 
         return responseLiveData
     }
+
 
     @WorkerThread
     fun fetchPhoto(url: String): Bitmap? {
